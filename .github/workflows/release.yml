@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write  # required to create GitHub releases
+
+jobs:
+  release:
+    runs-on: macos-26  # Apple Silicon (arm64)
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: stable
+
+      - name: Install prerequisites
+        run: |
+          brew tap libkrun/krun
+          brew install libkrun/krun/libkrun llvm dylibbundler
+
+      - name: Set build environment
+        run: |
+          PREFIX=$(brew --prefix)
+          echo "DYLD_LIBRARY_PATH=$PREFIX/lib:$PREFIX/opt/llvm/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
+          # bindgen (used by krun-sys) needs libclang
+          echo "LIBCLANG_PATH=$PREFIX/opt/llvm/lib" >> "$GITHUB_ENV"
+
+      - name: Build distribution package
+        run: |
+          chmod +x dist.sh
+          ./dist.sh
+
+      - name: Create archive
+        run: |
+          cd dist
+          zip -r ../krun-hello-macos-arm64.zip .
+
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            krun-hello-macos-arm64.zip \
+            --title "krun-hello ${{ github.ref_name }}" \
+            --generate-notes
