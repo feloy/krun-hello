@@ -6,7 +6,7 @@ use std::ptr;
 use libc::{fork, tcgetattr, tcsetattr, waitpid, STDIN_FILENO, TCSAFLUSH};
 use krun_sys::{
     krun_add_virtio_console_default, krun_add_virtiofs, krun_create_ctx, krun_set_exec,
-    krun_set_vm_config, krun_set_workdir, krun_start_enter,
+    krun_set_log_level, krun_set_vm_config, krun_set_workdir, krun_start_enter,
 };
 
 // dlopen is in libSystem on macOS — always linked, no extra dependency needed.
@@ -71,6 +71,11 @@ fn main() {
         eprintln!("  cargo run -- /tmp/rootfs");
         std::process::exit(1);
     });
+
+    if debug_enabled() {
+        // 5 = trace — lets libkrun emit its own internal logs to stderr.
+        unsafe { krun_set_log_level(5) };
+    }
 
     preload_krunfw();
 

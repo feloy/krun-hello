@@ -40,6 +40,9 @@ jobs:
             https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.3-aarch64.tar.gz \
             | tar -C /tmp/rootfs -xz
 
+      - name: Show libkrun version
+        run: brew info libkrun/krun/libkrun
+
       - name: Run VM and verify output
         env:
           KRUN_DEBUG: "1"
