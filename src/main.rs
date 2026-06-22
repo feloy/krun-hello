@@ -3,6 +3,7 @@ use std::os::raw::c_char;
 use std::path::Path;
 use std::ptr;
 
+use libc::{fork, tcgetattr, tcsetattr, waitpid, STDIN_FILENO, TCSAFLUSH};
 use krun_sys::{
     krun_add_virtio_console_default, krun_add_virtiofs, krun_create_ctx, krun_set_exec,
     krun_set_vm_config, krun_set_workdir, krun_start_enter,
@@ -62,8 +63,12 @@ fn main() {
 
     println!("Booting libkrun VM (rootfs: {})...", rootfs);
 
-    unsafe {
-        // Allocate a VM context; returns a non-negative ID on success.
+    // Save terminal state before the VM's virtio console puts it in raw mode.
+    // We restore it in the parent after the child's _exit() bypasses atexit.
+    let mut saved_term: libc::termios = unsafe { std::mem::zeroed() };
+    let term_saved = unsafe { tcgetattr(STDIN_FILENO, &mut saved_term) } == 0;
+
+    let ctx_id = unsafe {
         let ctx_id = krun_create_ctx();
         assert!(ctx_id >= 0, "krun_create_ctx failed: {}", ctx_id);
         let ctx_id = ctx_id as u32;
@@ -104,10 +109,29 @@ fn main() {
             krun_set_exec(ctx_id, exec.as_ptr(), argv.as_ptr(), envp.as_ptr()),
         );
 
-        // Boot the VM — transfers control and never returns on success.
-        // krun_start_enter calls _exit() internally; terminal restoration
-        // (stty sane) is handled by the shell wrapper in run.sh / dist.sh.
-        let ret = krun_start_enter(ctx_id);
+        ctx_id
+    };
+
+    // Fork so the parent can restore the terminal after krun_start_enter's
+    // internal _exit() tears down the child without running atexit handlers.
+    let pid = unsafe { fork() };
+    if pid < 0 {
+        eprintln!("fork failed");
+        std::process::exit(1);
+    }
+
+    if pid == 0 {
+        // Child: boot the VM — krun_start_enter calls _exit() internally.
+        let ret = unsafe { krun_start_enter(ctx_id) };
         eprintln!("VM exited with code: {}", ret);
+        unsafe { libc::_exit(ret) };
+    }
+
+    // Parent: wait for the child, then restore the terminal.
+    unsafe {
+        waitpid(pid, ptr::null_mut(), 0);
+        if term_saved {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_term);
+        }
     }
 }

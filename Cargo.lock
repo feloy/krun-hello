@@ -82,6 +82,7 @@ name = "krun-hello"
 version = "0.1.0"
 dependencies = [
  "krun-sys",
+ "libc",
 ]
 
 [[package]]

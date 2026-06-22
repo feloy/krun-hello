@@ -17,8 +17,8 @@ cargo build --release
 rm -rf "$DIST"
 mkdir -p "$LIBS"
 # The actual binary is krun-hello.bin; krun-hello is a wrapper script that
-# restores the terminal after the VM exits (libkrun calls _exit(), bypassing
-# atexit handlers, so the fix must happen at the shell level).
+# sets DYLD_LIBRARY_PATH. Terminal restoration after the VM's _exit() is
+# handled inside the binary via fork + tcsetattr.
 cp "$BUILD" "$DIST/$BINARY.bin"
 
 # Bundle static dylib dependencies and rewrite their load paths.
@@ -53,13 +53,12 @@ for lib in "$LIBS"/*.dylib; do
 done
 codesign --sign - --entitlements entitlements.plist --force "$DIST/$BINARY.bin"
 
-# Wrapper script: sets DYLD_LIBRARY_PATH for the dlopen'd libkrunfw and
-# runs stty sane after the VM exits to restore the terminal.
+# Wrapper script: sets DYLD_LIBRARY_PATH for the dlopen'd libkrunfw.
+# Terminal restoration is handled inside the binary (fork + tcsetattr).
 cat > "$DIST/$BINARY" << 'EOF'
 #!/bin/sh
 DIR="$(cd "$(dirname "$0")" && pwd)"
-DYLD_LIBRARY_PATH="$DIR/libs:${DYLD_LIBRARY_PATH}" "$DIR/krun-hello.bin" "$@" || true
-stty sane
+DYLD_LIBRARY_PATH="$DIR/libs:${DYLD_LIBRARY_PATH}" "$DIR/krun-hello.bin" "$@"
 EOF
 chmod +x "$DIST/$BINARY"
 
