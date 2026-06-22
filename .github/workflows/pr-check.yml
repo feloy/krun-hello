@@ -41,6 +41,9 @@ jobs:
             | tar -C /tmp/rootfs -xz
 
       - name: Run VM and verify output
+        env:
+          KRUN_DEBUG: "1"
+          RUST_LOG: debug
         run: |
           output=$(./dist/krun-hello /tmp/rootfs 2>&1)
           echo "$output"
