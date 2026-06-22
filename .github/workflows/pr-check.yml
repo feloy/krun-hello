@@ -43,6 +43,11 @@ jobs:
       - name: Show libkrun version
         run: brew info libkrun/krun/libkrun
 
+      - name: Verify binary signature and entitlements
+        run: |
+          codesign --verify --verbose dist/krun-hello.bin
+          codesign -d --entitlements :- dist/krun-hello.bin
+
       - name: Run VM and verify output
         env:
           KRUN_DEBUG: "1"
