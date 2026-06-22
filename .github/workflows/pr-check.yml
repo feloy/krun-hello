@@ -43,8 +43,10 @@ jobs:
       - name: Show libkrun version
         run: brew info libkrun/krun/libkrun
 
-      - name: Verify binary signature and entitlements
+      - name: Check hypervisor availability
         run: |
+          sysctl kern.hv_support
+          sysctl -n kern.hv_support | grep -q 1 && echo "HV supported" || echo "HV NOT supported — nested virtualisation likely"
           codesign --verify --verbose dist/krun-hello.bin
           codesign -d --entitlements :- dist/krun-hello.bin
 
