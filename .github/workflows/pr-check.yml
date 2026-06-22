@@ -1,0 +1,47 @@
+name: PR Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: macos-26  # Apple Silicon (arm64)
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: dtolnay/rust-toolchain@67ef31d5b988238dd797d409d6f9574278e20537 # master
+        with:
+          toolchain: stable
+
+      - name: Install prerequisites
+        run: |
+          brew tap libkrun/krun
+          brew install libkrun/krun/libkrun llvm
+
+      - name: Set build environment
+        run: |
+          PREFIX=$(brew --prefix)
+          echo "DYLD_LIBRARY_PATH=$PREFIX/lib:$PREFIX/opt/llvm/lib" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$PREFIX/opt/llvm/lib" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          cargo build
+          codesign --sign - --entitlements entitlements.plist --force target/debug/krun-hello
+
+      - name: Prepare Alpine rootfs
+        run: |
+          mkdir -p /tmp/rootfs
+          curl -fsSL \
+            https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.3-aarch64.tar.gz \
+            | tar -C /tmp/rootfs -xz
+
+      - name: Run VM and verify output
+        run: |
+          output=$(./target/debug/krun-hello /tmp/rootfs 2>&1)
+          echo "$output"
+          echo "$output" | grep -qF "Hello from libkrun VM!"
