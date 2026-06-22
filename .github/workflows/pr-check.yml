@@ -19,7 +19,7 @@ jobs:
       - name: Install prerequisites
         run: |
           brew tap libkrun/krun
-          brew install libkrun/krun/libkrun llvm
+          brew install libkrun/krun/libkrun llvm dylibbundler
 
       - name: Set build environment
         run: |
@@ -28,10 +28,10 @@ jobs:
           echo "PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$PREFIX/opt/llvm/lib" >> "$GITHUB_ENV"
 
-      - name: Build
+      - name: Build distribution package
         run: |
-          cargo build
-          codesign --sign - --entitlements entitlements.plist --force target/debug/krun-hello
+          chmod +x dist.sh
+          ./dist.sh
 
       - name: Prepare Alpine rootfs
         run: |
@@ -42,7 +42,6 @@ jobs:
 
       - name: Run VM and verify output
         run: |
-          output=$(DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH}" \
-            ./target/debug/krun-hello /tmp/rootfs 2>&1)
+          output=$(./dist/krun-hello /tmp/rootfs 2>&1)
           echo "$output"
           echo "$output" | grep -qF "Hello from libkrun VM!"
