@@ -86,9 +86,19 @@ fn main() {
         );
 
         // Wire the VM's console to our own stdin/stdout/stderr.
+        // krun_add_virtio_console_default calls tcsetattr on the stdin fd to
+        // put the terminal into raw mode; this fails with EINVAL if stdin is
+        // not a TTY (e.g. CI, pipes). Fall back to /dev/null in that case —
+        // the VM's output still reaches stdout via fd 1.
+        let console_stdin = if libc::isatty(libc::STDIN_FILENO) == 1 {
+            libc::STDIN_FILENO
+        } else {
+            let devnull = CString::new("/dev/null").unwrap();
+            libc::open(devnull.as_ptr(), libc::O_RDONLY)
+        };
         check(
             "krun_add_virtio_console_default",
-            krun_add_virtio_console_default(ctx_id, 0, 1, 2),
+            krun_add_virtio_console_default(ctx_id, console_stdin, 1, 2),
         );
 
         // Start in /.
