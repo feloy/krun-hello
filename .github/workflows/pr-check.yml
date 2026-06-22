@@ -42,6 +42,7 @@ jobs:
 
       - name: Run VM and verify output
         run: |
-          output=$(./target/debug/krun-hello /tmp/rootfs 2>&1)
+          output=$(DYLD_LIBRARY_PATH="$(brew --prefix)/lib:${DYLD_LIBRARY_PATH}" \
+            ./target/debug/krun-hello /tmp/rootfs 2>&1)
           echo "$output"
           echo "$output" | grep -qF "Hello from libkrun VM!"
