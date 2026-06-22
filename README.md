@@ -125,6 +125,14 @@ dist/
 
 End-users need nothing installed. Distribute the `dist/` directory as a zip or DMG.
 
+**Installing as an end-user** — macOS quarantines files downloaded from the internet. Before unzipping, strip the quarantine flag to avoid the "cannot be opened because the developer cannot be verified" dialog:
+
+```sh
+xattr -d com.apple.quarantine krun-hello-macos-arm64.zip
+unzip krun-hello-macos-arm64.zip -d krun-hello
+./krun-hello/krun-hello /tmp/rootfs
+```
+
 **For notarized distribution** (App Store / Gatekeeper), replace `--sign -` in `dist.sh` with your Developer ID certificate and add `--options runtime`:
 
 ```sh
