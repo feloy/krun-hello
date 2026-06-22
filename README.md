@@ -105,13 +105,49 @@ Booting libkrun VM (rootfs: /tmp/rootfs)...
 Hello from libkrun VM!
 ```
 
+## Distribution
+
+To produce a self-contained package that end-users can run without installing libkrun:
+
+```sh
+brew install dylibbundler   # one-time
+chmod +x dist.sh
+./dist.sh
+```
+
+This creates a `dist/` directory:
+
+```
+dist/
+  krun-hello       — release binary (signed)
+  libs/            — all dylib dependencies (libkrun, libkrunfw, etc.)
+```
+
+End-users need nothing installed. Distribute the `dist/` directory as a zip or DMG.
+
+**For notarized distribution** (App Store / Gatekeeper), replace `--sign -` in `dist.sh` with your Developer ID certificate and add `--options runtime`:
+
+```sh
+codesign --sign "Developer ID Application: You (TEAMID)" \
+         --options runtime \
+         --entitlements entitlements.plist \
+         --force dist/krun-hello
+```
+
+Then notarize with `xcrun notarytool`.
+
+### Why libkrunfw needs special handling
+
+`libkrun` loads its kernel (`libkrunfw`) via `dlopen()` at runtime using just the filename — it is not a static link-time dependency, so `dylibbundler` won't see it. `dist.sh` copies it manually and `src/main.rs` pre-loads it as `RTLD_GLOBAL` before any libkrun call, so that libkrun's own `dlopen()` finds it already in memory. This avoids needing `DYLD_LIBRARY_PATH` (which is stripped under hardened runtime).
+
 ## Project structure
 
 ```
-src/main.rs        — VM setup and boot logic (all libkrun calls)
+src/main.rs        — VM setup, boot logic, libkrunfw pre-loader
 Cargo.toml         — single dependency: krun-sys
 entitlements.plist — Hypervisor.framework entitlement for macOS signing
-run.sh             — build, sign, and run in one step
+run.sh             — build, sign, and run in one step (development)
+dist.sh            — build, bundle dylibs, sign (distribution)
 ```
 
 ## Troubleshooting

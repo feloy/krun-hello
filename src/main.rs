@@ -1,11 +1,40 @@
 use std::ffi::CString;
 use std::os::raw::c_char;
+use std::path::Path;
 use std::ptr;
 
 use krun_sys::{
     krun_add_virtio_console_default, krun_add_virtiofs, krun_create_ctx, krun_set_exec,
     krun_set_vm_config, krun_set_workdir, krun_start_enter,
 };
+
+// dlopen is in libSystem on macOS — always linked, no extra dependency needed.
+extern "C" {
+    fn dlopen(filename: *const c_char, flag: i32) -> *mut std::ffi::c_void;
+}
+const RTLD_NOW: i32 = 0x2;
+const RTLD_GLOBAL: i32 = 0x8;
+
+// libkrun loads libkrunfw via dlopen() at runtime using just the filename, so
+// dylibbundler won't see it as a static dependency and DYLD_LIBRARY_PATH won't
+// help under hardened runtime. We pre-load it as RTLD_GLOBAL from the bundled
+// libs/ directory so that libkrun's own dlopen() finds it already in memory.
+// During development (no libs/ dir next to the binary) this is a no-op.
+fn preload_krunfw() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let libs = exe.parent().unwrap_or(Path::new(".")).join("libs");
+    let Ok(entries) = std::fs::read_dir(&libs) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let s = name.to_string_lossy();
+        if s.starts_with("libkrunfw") && s.ends_with(".dylib") {
+            if let Some(p) = entry.path().to_str().and_then(|s| CString::new(s).ok()) {
+                unsafe { dlopen(p.as_ptr(), RTLD_NOW | RTLD_GLOBAL); }
+            }
+            break;
+        }
+    }
+}
 
 fn check(call: &str, ret: i32) {
     if ret < 0 {
@@ -28,6 +57,8 @@ fn main() {
         eprintln!("  cargo run -- /tmp/rootfs");
         std::process::exit(1);
     });
+
+    preload_krunfw();
 
     println!("Booting libkrun VM (rootfs: {})...", rootfs);
 
@@ -74,6 +105,8 @@ fn main() {
         );
 
         // Boot the VM — transfers control and never returns on success.
+        // krun_start_enter calls _exit() internally; terminal restoration
+        // (stty sane) is handled by the shell wrapper in run.sh / dist.sh.
         let ret = krun_start_enter(ctx_id);
         eprintln!("VM exited with code: {}", ret);
     }
