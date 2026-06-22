@@ -100,7 +100,7 @@ It builds the binary, signs it with `entitlements.plist`, then runs it. You cann
 
 Expected output:
 
-```
+```text
 Booting libkrun VM (rootfs: /tmp/rootfs)...
 Hello from libkrun VM!
 ```
@@ -117,7 +117,7 @@ chmod +x dist.sh
 
 This creates a `dist/` directory:
 
-```
+```text
 dist/
   krun-hello       — release binary (signed)
   libs/            — all dylib dependencies (libkrun, libkrunfw, etc.)
@@ -150,7 +150,7 @@ Then notarize with `xcrun notarytool`.
 
 ## Project structure
 
-```
+```text
 src/main.rs        — VM setup, boot logic, libkrunfw pre-loader
 Cargo.toml         — single dependency: krun-sys
 entitlements.plist — Hypervisor.framework entitlement for macOS signing
