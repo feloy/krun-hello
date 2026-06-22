@@ -1,12 +1,19 @@
 name: PR Check
 
+# GitHub-hosted macos runners have kern.hv_support=0 (they run inside VMs
+# themselves), so the Apple Hypervisor framework is unavailable and
+# krun_start_enter always fails with EINVAL. VM execution must be tested
+# on a self-hosted bare-metal runner. This workflow covers what can be
+# verified in the hosted environment: build correctness, distribution
+# packaging, and code signing.
+
 on:
   pull_request:
     branches:
       - main
 
 jobs:
-  build-and-test:
+  build:
     runs-on: macos-26  # Apple Silicon (arm64)
 
     steps:
@@ -33,28 +40,8 @@ jobs:
           chmod +x dist.sh
           ./dist.sh
 
-      - name: Prepare Alpine rootfs
+      - name: Verify signature and hypervisor entitlement
         run: |
-          mkdir -p /tmp/rootfs
-          curl -fsSL \
-            https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.3-aarch64.tar.gz \
-            | tar -C /tmp/rootfs -xz
-
-      - name: Show libkrun version
-        run: brew info libkrun/krun/libkrun
-
-      - name: Check hypervisor availability
-        run: |
-          sysctl kern.hv_support
-          sysctl -n kern.hv_support | grep -q 1 && echo "HV supported" || echo "HV NOT supported — nested virtualisation likely"
           codesign --verify --verbose dist/krun-hello.bin
-          codesign -d --entitlements :- dist/krun-hello.bin
-
-      - name: Run VM and verify output
-        env:
-          KRUN_DEBUG: "1"
-          RUST_LOG: debug
-        run: |
-          output=$(./dist/krun-hello /tmp/rootfs 2>&1)
-          echo "$output"
-          echo "$output" | grep -qF "Hello from libkrun VM!"
+          codesign -d --entitlements :- dist/krun-hello.bin | \
+            grep -q "com.apple.security.hypervisor"
