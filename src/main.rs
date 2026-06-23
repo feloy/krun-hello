@@ -6,7 +6,7 @@ use std::ptr;
 use libc::{fork, tcgetattr, tcsetattr, waitpid, STDIN_FILENO, TCSAFLUSH};
 use krun_sys::{
     krun_add_virtio_console_default, krun_add_virtiofs, krun_create_ctx, krun_set_exec,
-    krun_set_vm_config, krun_set_workdir, krun_start_enter,
+    krun_set_log_level, krun_set_vm_config, krun_set_workdir, krun_start_enter,
 };
 
 // dlopen is in libSystem on macOS — always linked, no extra dependency needed.
@@ -37,11 +37,24 @@ fn preload_krunfw() {
     }
 }
 
+fn debug_enabled() -> bool {
+    std::env::var("KRUN_DEBUG").is_ok()
+}
+
+macro_rules! dbg_log {
+    ($($arg:tt)*) => {
+        if debug_enabled() {
+            eprintln!("[krun-hello] {}", format!($($arg)*));
+        }
+    };
+}
+
 fn check(call: &str, ret: i32) {
     if ret < 0 {
         eprintln!("libkrun: {} failed (code {})", call, ret);
         std::process::exit(1);
     }
+    dbg_log!("{} -> {}", call, ret);
 }
 
 fn main() {
@@ -59,6 +72,11 @@ fn main() {
         std::process::exit(1);
     });
 
+    if debug_enabled() {
+        // 5 = trace — lets libkrun emit its own internal logs to stderr.
+        unsafe { krun_set_log_level(5) };
+    }
+
     preload_krunfw();
 
     println!("Booting libkrun VM (rootfs: {})...", rootfs);
@@ -67,11 +85,19 @@ fn main() {
     // We restore it in the parent after the child's _exit() bypasses atexit.
     let mut saved_term: libc::termios = unsafe { std::mem::zeroed() };
     let term_saved = unsafe { tcgetattr(STDIN_FILENO, &mut saved_term) } == 0;
+    dbg_log!("tcgetattr(stdin) -> term_saved={}", term_saved);
+    dbg_log!(
+        "isatty: stdin={} stdout={} stderr={}",
+        unsafe { libc::isatty(0) },
+        unsafe { libc::isatty(1) },
+        unsafe { libc::isatty(2) },
+    );
 
     let ctx_id = unsafe {
         let ctx_id = krun_create_ctx();
         assert!(ctx_id >= 0, "krun_create_ctx failed: {}", ctx_id);
         let ctx_id = ctx_id as u32;
+        dbg_log!("krun_create_ctx -> ctx_id={}", ctx_id);
 
         // 1 vCPU, 512 MiB RAM.
         check("krun_set_vm_config", krun_set_vm_config(ctx_id, 1, 512));
@@ -86,9 +112,22 @@ fn main() {
         );
 
         // Wire the VM's console to our own stdin/stdout/stderr.
+        // krun_add_virtio_console_default calls tcsetattr on the stdin fd to
+        // put the terminal into raw mode; this fails with EINVAL if stdin is
+        // not a TTY (e.g. CI, pipes). Fall back to /dev/null in that case —
+        // the VM's output still reaches stdout via fd 1.
+        let console_stdin = if libc::isatty(libc::STDIN_FILENO) == 1 {
+            dbg_log!("stdin is a TTY, using fd 0 for console");
+            libc::STDIN_FILENO
+        } else {
+            let devnull = CString::new("/dev/null").unwrap();
+            let fd = libc::open(devnull.as_ptr(), libc::O_RDONLY);
+            dbg_log!("stdin is not a TTY, opened /dev/null as fd {}", fd);
+            fd
+        };
         check(
             "krun_add_virtio_console_default",
-            krun_add_virtio_console_default(ctx_id, 0, 1, 2),
+            krun_add_virtio_console_default(ctx_id, console_stdin, 1, 2),
         );
 
         // Start in /.
@@ -119,8 +158,10 @@ fn main() {
         eprintln!("fork failed");
         std::process::exit(1);
     }
+    dbg_log!("fork -> pid={}", pid);
 
     if pid == 0 {
+        dbg_log!("child: calling krun_start_enter(ctx_id={})", ctx_id);
         // Child: boot the VM — krun_start_enter calls _exit() internally.
         let ret = unsafe { krun_start_enter(ctx_id) };
         eprintln!("VM exited with code: {}", ret);
@@ -128,8 +169,16 @@ fn main() {
     }
 
     // Parent: wait for the child, then restore the terminal.
+    let mut wstatus: libc::c_int = 0;
+    unsafe { waitpid(pid, &mut wstatus, 0) };
+    dbg_log!(
+        "waitpid: exited={} exit_code={} signaled={} signal={}",
+        libc::WIFEXITED(wstatus),
+        if libc::WIFEXITED(wstatus) { libc::WEXITSTATUS(wstatus) } else { -1 },
+        libc::WIFSIGNALED(wstatus),
+        if libc::WIFSIGNALED(wstatus) { libc::WTERMSIG(wstatus) } else { -1 },
+    );
     unsafe {
-        waitpid(pid, ptr::null_mut(), 0);
         if term_saved {
             tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_term);
         }
