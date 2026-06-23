@@ -3,9 +3,8 @@ use std::os::raw::c_char;
 use std::path::Path;
 use std::ptr;
 
-use libc::{fork, tcgetattr, tcsetattr, waitpid, STDIN_FILENO, TCSAFLUSH};
 use krun_sys::{
-    krun_add_virtio_console_default, krun_add_virtiofs, krun_create_ctx, krun_set_exec,
+    krun_add_virtiofs, krun_create_ctx, krun_set_exec,
     krun_set_log_level, krun_set_vm_config, krun_set_workdir, krun_start_enter,
 };
 
@@ -81,11 +80,6 @@ fn main() {
 
     println!("Booting libkrun VM (rootfs: {})...", rootfs);
 
-    // Save terminal state before the VM's virtio console puts it in raw mode.
-    // We restore it in the parent after the child's _exit() bypasses atexit.
-    let mut saved_term: libc::termios = unsafe { std::mem::zeroed() };
-    let term_saved = unsafe { tcgetattr(STDIN_FILENO, &mut saved_term) } == 0;
-    dbg_log!("tcgetattr(stdin) -> term_saved={}", term_saved);
     dbg_log!(
         "isatty: stdin={} stdout={} stderr={}",
         unsafe { libc::isatty(0) },
@@ -111,25 +105,6 @@ fn main() {
             krun_add_virtiofs(ctx_id, tag.as_ptr(), path.as_ptr()),
         );
 
-        // Wire the VM's console to our own stdin/stdout/stderr.
-        // krun_add_virtio_console_default calls tcsetattr on the stdin fd to
-        // put the terminal into raw mode; this fails with EINVAL if stdin is
-        // not a TTY (e.g. CI, pipes). Fall back to /dev/null in that case —
-        // the VM's output still reaches stdout via fd 1.
-        let console_stdin = if libc::isatty(libc::STDIN_FILENO) == 1 {
-            dbg_log!("stdin is a TTY, using fd 0 for console");
-            libc::STDIN_FILENO
-        } else {
-            let devnull = CString::new("/dev/null").unwrap();
-            let fd = libc::open(devnull.as_ptr(), libc::O_RDONLY);
-            dbg_log!("stdin is not a TTY, opened /dev/null as fd {}", fd);
-            fd
-        };
-        check(
-            "krun_add_virtio_console_default",
-            krun_add_virtio_console_default(ctx_id, console_stdin, 1, 2),
-        );
-
         // Start in /.
         let workdir = CString::new("/").unwrap();
         check("krun_set_workdir", krun_set_workdir(ctx_id, workdir.as_ptr()));
@@ -151,36 +126,7 @@ fn main() {
         ctx_id
     };
 
-    // Fork so the parent can restore the terminal after krun_start_enter's
-    // internal _exit() tears down the child without running atexit handlers.
-    let pid = unsafe { fork() };
-    if pid < 0 {
-        eprintln!("fork failed");
-        std::process::exit(1);
-    }
-    dbg_log!("fork -> pid={}", pid);
-
-    if pid == 0 {
-        dbg_log!("child: calling krun_start_enter(ctx_id={})", ctx_id);
-        // Child: boot the VM — krun_start_enter calls _exit() internally.
-        let ret = unsafe { krun_start_enter(ctx_id) };
-        eprintln!("VM exited with code: {}", ret);
-        unsafe { libc::_exit(ret) };
-    }
-
-    // Parent: wait for the child, then restore the terminal.
-    let mut wstatus: libc::c_int = 0;
-    unsafe { waitpid(pid, &mut wstatus, 0) };
-    dbg_log!(
-        "waitpid: exited={} exit_code={} signaled={} signal={}",
-        libc::WIFEXITED(wstatus),
-        if libc::WIFEXITED(wstatus) { libc::WEXITSTATUS(wstatus) } else { -1 },
-        libc::WIFSIGNALED(wstatus),
-        if libc::WIFSIGNALED(wstatus) { libc::WTERMSIG(wstatus) } else { -1 },
-    );
-    unsafe {
-        if term_saved {
-            tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_term);
-        }
-    }
+    dbg_log!("calling krun_start_enter(ctx_id={})", ctx_id);
+    let ret = unsafe { krun_start_enter(ctx_id) };
+    eprintln!("VM exited with code: {}", ret);
 }
