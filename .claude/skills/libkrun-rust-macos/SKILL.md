@@ -120,10 +120,11 @@ Use `krun-sys` (bindgen-generated FFI bindings). All calls are `unsafe`. Call th
 | `krun_create_ctx()` | Returns a non-negative ctx_id on success, negative on error |
 | `krun_set_vm_config(ctx, vcpus, ram_mib)` | 1 vCPU + 512 MiB is enough for most workloads |
 | `krun_add_virtiofs(ctx, tag, path)` | **tag must be `"/dev/root"` (`KRUN_FS_ROOT_TAG`)** — NOT `"root"`. Wrong tag causes kernel panic: "VFS: Unable to mount root fs" |
-| `krun_add_virtio_console_default(ctx, 0, 1, 2)` | Wires VM console to host stdin/stdout/stderr |
 | `krun_set_workdir(ctx, "/")` | Working directory inside the VM |
 | `krun_set_exec(ctx, exec_path, argv, envp)` | Binary path is inside the VM filesystem |
 | `krun_start_enter(ctx)` | Boots the VM — never returns on success |
+
+**Do NOT call `krun_add_virtio_console_default`** for plain stdin/stdout/stderr passthrough. libkrun auto-detects the process's stdio and wires it to the VM console automatically (the same path used by krunvm). Calling this function explicitly bypasses the auto-configure path, which is the path that correctly saves and restores terminal state via libkrun's exit observer before `_exit()`. If you call it, the host terminal is left in raw mode after the VM exits — typed characters become invisible and output loses carriage returns.
 
 **Minimal working example:**
 
@@ -133,7 +134,7 @@ use std::os::raw::c_char;
 use std::ptr;
 
 use krun_sys::{
-    krun_add_virtio_console_default, krun_add_virtiofs, krun_create_ctx, krun_set_exec,
+    krun_add_virtiofs, krun_create_ctx, krun_set_exec,
     krun_set_vm_config, krun_set_workdir, krun_start_enter,
 };
 
@@ -158,9 +159,6 @@ fn main() {
         let tag = CString::new("/dev/root").unwrap();
         let path = CString::new(rootfs.as_str()).unwrap();
         check("krun_add_virtiofs", krun_add_virtiofs(ctx_id, tag.as_ptr(), path.as_ptr()));
-
-        check("krun_add_virtio_console_default",
-            krun_add_virtio_console_default(ctx_id, 0, 1, 2));
 
         let workdir = CString::new("/").unwrap();
         check("krun_set_workdir", krun_set_workdir(ctx_id, workdir.as_ptr()));
@@ -207,3 +205,4 @@ Remove it once the issue is found — it is very noisy.
 | `VmCreate` / exit code -22 | Missing `com.apple.security.hypervisor` entitlement | Sign binary with `entitlements.plist` using `codesign` |
 | Kernel panic: `VFS: Unable to mount root fs` | Wrong virtiofs root tag | Use `"/dev/root"`, not `"root"` |
 | Code signature lost after rebuild | Used `cargo run` instead of `run.sh` | Always use `run.sh` |
+| Terminal broken after VM exits (no echo, no carriage returns) | Called `krun_add_virtio_console_default` explicitly | Remove the call — libkrun auto-configures the console and correctly restores terminal state |

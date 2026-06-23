@@ -17,8 +17,7 @@ cargo build --release
 rm -rf "$DIST"
 mkdir -p "$LIBS"
 # The actual binary is krun-hello.bin; krun-hello is a wrapper script that
-# sets DYLD_LIBRARY_PATH. Terminal restoration after the VM's _exit() is
-# handled inside the binary via fork + tcsetattr.
+# sets DYLD_LIBRARY_PATH so dlopen can find libkrunfw.
 cp "$BUILD" "$DIST/$BINARY.bin"
 
 # Bundle static dylib dependencies and rewrite their load paths.
@@ -54,7 +53,6 @@ done
 codesign --sign - --entitlements entitlements.plist --force "$DIST/$BINARY.bin"
 
 # Wrapper script: sets DYLD_LIBRARY_PATH for the dlopen'd libkrunfw.
-# Terminal restoration is handled inside the binary (fork + tcsetattr).
 cat > "$DIST/$BINARY" << 'EOF'
 #!/bin/sh
 DIR="$(cd "$(dirname "$0")" && pwd)"

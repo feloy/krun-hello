@@ -24,7 +24,6 @@ The Rust crate [`krun-sys`](https://crates.io/crates/krun-sys) provides generate
 | `krun_create_ctx()` | Allocates a new VM context; returns an integer context ID |
 | `krun_set_vm_config(ctx, vcpus, ram_mib)` | Configures the VM with 1 vCPU and 512 MiB of RAM |
 | `krun_add_virtiofs(ctx, "/dev/root", path)` | Shares the host rootfs directory into the VM; the tag `"/dev/root"` (`KRUN_FS_ROOT_TAG`) tells the bundled kernel to mount it as `/` |
-| `krun_add_virtio_console_default(ctx, 0, 1, 2)` | Wires the VM's console to the host's stdin/stdout/stderr |
 | `krun_set_workdir(ctx, "/")` | Sets the working directory inside the VM |
 | `krun_set_exec(ctx, "/bin/echo", argv, envp)` | Sets the binary and arguments to run inside the VM |
 | `krun_start_enter(ctx)` | Boots the VM — this call transfers control and never returns on success |
